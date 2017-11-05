@@ -1,6 +1,11 @@
 import torch
 from torch import nn
 
+NUM_EPOCHS = 100
+BATCH_SIZE = 256
+CHANNEL_SIZE = 4
+USE_CUDA = False
+
 
 class RadioTransformerNetwork(nn.Module):
     def __init__(self, in_channels, compressed_dim):
@@ -26,16 +31,19 @@ class RadioTransformerNetwork(nn.Module):
     def forward(self, x):
         x = self.encoder(x)
 
-        # Normalization
+        # Normalization.
         x = (self.in_channels ** 2) * (x / x.norm(dim=-1)[:, None])
 
-        # 7dBW to Er/N0
+        # 7dBW to SNR.
         training_signal_noise_ratio = 5.01187
 
         # bit / channel_use
         communication_rate = 1
 
-        x += Variable(torch.randn(*x.size()) / ((2 * communication_rate * training_signal_noise_ratio) ** 0.5)).cuda()
+        # Simulated Gaussian noise.
+        noise = Variable(torch.randn(*x.size()) / ((2 * communication_rate * training_signal_noise_ratio) ** 0.5))
+        if USE_CUDA: noise = noise.cuda()
+        x += noise
 
         x = self.decoder(x)
 
@@ -48,24 +56,23 @@ if __name__ == "__main__":
     from torch.autograd import Variable
     from torch.optim import Adam
     import torchnet as tnt
+    import math
 
-    channel_size = 4
+    model = RadioTransformerNetwork(CHANNEL_SIZE, compressed_dim=int(math.log2(CHANNEL_SIZE)))
+    if USE_CUDA: model = model.cuda()
 
-    model = RadioTransformerNetwork(channel_size, compressed_dim=2)
-    model.cuda()
+    train_labels = (torch.rand(10000) * CHANNEL_SIZE).long()
+    train_data = torch.sparse.torch.eye(CHANNEL_SIZE).index_select(dim=0, index=train_labels)
 
-    train_labels = (torch.rand(10000) * channel_size).long()
-    train_data = torch.sparse.torch.eye(channel_size).index_select(dim=0, index=train_labels)
-
-    test_labels = (torch.rand(1500) * channel_size).long()
-    test_data = torch.sparse.torch.eye(channel_size).index_select(dim=0, index=test_labels)
+    test_labels = (torch.rand(1500) * CHANNEL_SIZE).long()
+    test_data = torch.sparse.torch.eye(CHANNEL_SIZE).index_select(dim=0, index=test_labels)
 
     optimizer = Adam(model.parameters())
 
     engine = Engine()
     meter_loss = tnt.meter.AverageValueMeter()
     meter_accuracy = tnt.meter.ClassErrorMeter(accuracy=True)
-    confusion_meter = tnt.meter.ConfusionMeter(channel_size, normalized=True)
+    confusion_meter = tnt.meter.ConfusionMeter(CHANNEL_SIZE, normalized=True)
 
     loss_fn = nn.CrossEntropyLoss()
 
@@ -75,14 +82,18 @@ if __name__ == "__main__":
         labels = train_labels if mode else test_labels
         tensor_dataset = tnt.dataset.TensorDataset([data, labels])
 
-        return tensor_dataset.parallel(batch_size=256, num_workers=4, shuffle=mode)
+        return tensor_dataset.parallel(batch_size=BATCH_SIZE, num_workers=4, shuffle=mode)
 
 
     def processor(sample):
         data, labels, training = sample
 
-        data = Variable(data).cuda()
-        labels = Variable(labels).cuda()
+        data = Variable(data)
+        labels = Variable(labels)
+
+        if USE_CUDA:
+            data = data.cuda()
+            labels = labels.cuda()
 
         outputs = model(data)
 
@@ -129,6 +140,4 @@ if __name__ == "__main__":
     engine.hooks['on_start_epoch'] = on_start_epoch
     engine.hooks['on_end_epoch'] = on_end_epoch
 
-    engine.train(processor, get_iterator(True), maxepoch=100, optimizer=optimizer)
-
-
+    engine.train(processor, get_iterator(True), maxepoch=NUM_EPOCHS, optimizer=optimizer)
