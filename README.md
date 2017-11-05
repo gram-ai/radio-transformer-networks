@@ -52,7 +52,7 @@ $ python3 radio_transformer_networks.py
 
 ## Benchmarks
 
-Easily achieves ~98%+ within a span of 100 epochs.
+Achieves 100% within a span of ~30 epochs.
 
 Default PyTorch Adam optimizer hyperparameters were used with no learning rate scheduling. Epochs with batch size of 256 takes half a second on a Razer Blade w/ GTX 1050. 
 

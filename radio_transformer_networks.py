@@ -27,7 +27,7 @@ class RadioTransformerNetwork(nn.Module):
         x = self.encoder(x)
 
         # Normalization
-        x = (self.in_channels ** 2 / x.norm()) * x
+        x = (self.in_channels ** 2) * (x / x.norm(dim=-1)[:, None])
 
         # 7dBW to Er/N0
         training_signal_noise_ratio = 5.01187
